@@ -92,6 +92,7 @@ export default function HandTracker({ onControlUpdate }: HandTrackerProps) {
     const p2Controls: HandControlState = { forward: false, backward: false, left: false, right: false };
 
     if (results.landmarks && results.landmarks.length > 0) {
+      const handCount = results.landmarks.length;
       // Sort hands by X descending so index 0 is the Screen-Left hand (High camera X)
       const sortedHands = [...results.landmarks].sort((a, b) => b[0].x - a[0].x);
 
@@ -114,7 +115,6 @@ export default function HandTracker({ onControlUpdate }: HandTrackerProps) {
         // Gestures
         const isFist = fingersFoldedCount >= 3;
         const isOpen = fingersFoldedCount <= 1;
-        // Index pointing: index is the ONLY one extended (or one of the only ones)
         const isIndexPointing = !isIndexFolded && (fingersFoldedCount >= 2);
         
         const ctrl = index === 0 ? p1Controls : p2Controls;
@@ -125,12 +125,17 @@ export default function HandTracker({ onControlUpdate }: HandTrackerProps) {
         if (isOpen) ctrl.backward = true;
 
         // Steering: Intuitive Mirroring
-        // Scren-Left sector (P1) center: 0.75 (high camera X)
-        // Screen-Right sector (P2) center: 0.25 (low camera X)
-        const sectorCenter = index === 0 ? 0.75 : 0.25;
-        const deadZone = 0.08;
+        // If 1 hand: center is 0.5. If 2 hands: centers are 0.75 and 0.25.
+        // Screen-Left sector center (higher camera X)
+        // Screen-Right sector center (lower camera X)
+        let sectorCenter = 0.5;
+        if (handCount > 1) {
+            sectorCenter = index === 0 ? 0.75 : 0.25;
+        }
+        
+        const deadZone = 0.07; // Slightly tighter deadzone
 
-        // In mirrored view, physical left = screen left = higher camera X
+        // Mirroring: physical left = screen left = higher camera X
         if (wrist.x > sectorCenter + deadZone) ctrl.left = true;
         if (wrist.x < sectorCenter - deadZone) ctrl.right = true;
       });
