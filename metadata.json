@@ -1,0 +1,6 @@
+{
+  "name": "Remix: Turbo Race Multiplayer",
+  "description": "A 3D track racing game illustrating use of Full-Stack Runtime to support realtime multiplayer gameplay.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
