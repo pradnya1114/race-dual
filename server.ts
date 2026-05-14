@@ -13,6 +13,7 @@ async function startServer() {
   const httpServer = createServer(app);
   const io = new Server(httpServer);
   const PORT = 3000;
+  const TOTAL_LAPS = 3;
 
   // Game State
   type Player = {
@@ -156,6 +157,26 @@ async function startServer() {
           }
           player.lastLapStart = Date.now();
           io.to(roomId).emit("lapUpdate", { id: player.id, laps: player.laps, bestLapTime: player.bestLapTime });
+
+          // Check if race is finished for this player
+          if (player.laps >= TOTAL_LAPS) {
+              const results = Object.values(rooms[roomId].players)
+                  .sort((a, b) => {
+                      if (a.laps !== b.laps) return b.laps - a.laps;
+                      return a.bestLapTime - b.bestLapTime;
+                  })
+                  .map((p, i) => ({
+                      id: p.id,
+                      name: p.name,
+                      bestLapTime: p.bestLapTime,
+                      rank: i + 1
+                  }));
+              
+              // We could finish the game when the first person finishes, 
+              // or wait for everyone. Let's finish when the FIRST person finishes for now.
+              rooms[roomId].status = 'waiting'; 
+              io.to(roomId).emit("raceFinished", results);
+          }
         }
       }
     });

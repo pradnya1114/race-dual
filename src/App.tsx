@@ -14,12 +14,13 @@ import { socket } from './services/socket';
 import { Player } from './types';
 
 export default function App() {
-  const [view, setView] = useState<'landing' | 'lobby' | 'game'>('landing');
+  const [view, setView] = useState<'landing' | 'lobby' | 'game' | 'results'>('landing');
   const [roomCode, setRoomCode] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [players, setPlayers] = useState<Record<string, Player>>({});
   const [isHost, setIsHost] = useState(false);
   const [error, setError] = useState('');
+  const [results, setResults] = useState<any[]>([]);
 
   const [isOffline, setIsOffline] = useState(false);
 
@@ -58,6 +59,11 @@ export default function App() {
       setPlayers(initialPlayers);
       setIsOffline(false);
       setView('game');
+    });
+
+    socket.on('raceFinished', (raceResults) => {
+      setResults(raceResults);
+      setView('results');
     });
 
     socket.on('error', (msg) => {
@@ -237,7 +243,55 @@ export default function App() {
         )}
 
         {view === 'game' && (
-          <GameCanvas initialPlayers={players} isOffline={isOffline} />
+          <GameCanvas 
+            initialPlayers={players} 
+            isOffline={isOffline} 
+            onFinish={(res) => {
+              setResults(res);
+              setView('results');
+            }}
+          />
+        )}
+
+        {view === 'results' && (
+          <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700 max-w-lg w-full text-center">
+            <h2 className="text-3xl font-black italic mb-2 text-yellow-400">RACE FINISHED!</h2>
+            <p className="text-slate-400 mb-8 uppercase tracking-widest text-sm">Podium Standings</p>
+            
+            <div className="space-y-4 mb-8">
+              {results.map((res, i) => (
+                <div 
+                  key={res.id} 
+                  className={`flex items-center justify-between p-4 rounded-xl border ${
+                    i === 0 ? 'bg-yellow-500/10 border-yellow-500/50 scale-105 shadow-yellow-500/20 shadow-lg' : 
+                    i === 1 ? 'bg-slate-300/10 border-slate-300/30' :
+                    i === 2 ? 'bg-orange-600/10 border-orange-600/30' :
+                    'bg-slate-700/30 border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-4">
+                    <span className="text-2xl font-black italic text-slate-500 w-8">#{res.rank}</span>
+                    <span className="font-bold text-lg">{res.name}</span>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] text-slate-500 uppercase tracking-tighter">Best Lap</div>
+                    <div className="font-mono text-slate-200">
+                      {res.bestLapTime === Infinity ? '--:--' : (
+                        `${Math.floor(res.bestLapTime / 60000)}:${Math.floor((res.bestLapTime % 60000) / 1000).toString().padStart(2, '0')}.${Math.floor((res.bestLapTime % 1000) / 10).toString().padStart(2, '0')}`
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setView('landing')}
+              className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-4 rounded-xl shadow-lg transition-transform active:scale-95"
+            >
+              BACK TO MAIN MENU
+            </button>
+          </div>
         )}
       </main>
     </div>

@@ -5,6 +5,7 @@
 
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { socket } from '../services/socket';
+import HandTracker from './HandTracker';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { PerspectiveCamera, Environment, Text, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -21,6 +22,7 @@ const NITRO_ACCEL = 0.12;
 const FRICTION = 0.97;
 const TURN_SPEED = 0.035;
 const DRIFT_FACTOR = 0.94;
+const TOTAL_LAPS = 3;
 
 // Track Geometry
 const TRACK_RADIUS = 50; // Slightly narrower for more technical turns
@@ -343,7 +345,15 @@ const GameScene = ({
   );
 };
 
-export default function GameCanvas({ initialPlayers, isOffline }: { initialPlayers?: Record<string, Player>, isOffline?: boolean }) {
+export default function GameCanvas({ 
+  initialPlayers, 
+  isOffline,
+  onFinish
+}: { 
+  initialPlayers?: Record<string, Player>, 
+  isOffline?: boolean,
+  onFinish?: (results: any[]) => void
+}) {
   // Sanitize initial players to handle Infinity/null issue
   const sanitizedInitial = useMemo(() => {
       if (!initialPlayers) return {};
@@ -361,6 +371,10 @@ export default function GameCanvas({ initialPlayers, isOffline }: { initialPlaye
   const [nitro, setNitro] = useState(100);
   const [wrongWay, setWrongWay] = useState(false);
   const timerRef = useRef<HTMLDivElement>(null);
+  const handControlsRef = useRef({ 
+      p1: { forward: false, backward: false, left: false, right: false },
+      p2: { forward: false, backward: false, left: false, right: false }
+  });
   
   // HUD Helper
   const formatTime = (ms: number) => {
@@ -529,36 +543,29 @@ export default function GameCanvas({ initialPlayers, isOffline }: { initialPlaye
         // Input mapping for each player
         let up = false, down = false, left = false, right = false, nitroKey = false, driftKey = false;
         
+        const hc1 = handControlsRef.current.p1;
+        const hc2 = handControlsRef.current.p2;
+
         if (id === 'local-1' || (!isOffline && id === myId)) {
-          up = p.keys['KeyW'] || p.keys['ArrowUp'];
-          down = p.keys['KeyS'] || p.keys['ArrowDown'];
-          left = p.keys['KeyA'] || p.keys['ArrowLeft'];
-          right = p.keys['KeyD'] || p.keys['ArrowRight'];
+          // Player 1 controls (WASD or Hands)
+          // If offline 2-player, we restrict P1 to WASD to keep P2 on Arrows
+          const isP2Present = isOffline && !!localPlayersRef.current['local-2'];
+          const useArrows = !isP2Present; 
+
+          up = p.keys['KeyW'] || (useArrows && p.keys['ArrowUp']) || hc1.forward;
+          down = p.keys['KeyS'] || (useArrows && p.keys['ArrowDown']) || hc1.backward;
+          left = p.keys['KeyA'] || (useArrows && p.keys['ArrowLeft']) || hc1.left;
+          right = p.keys['KeyD'] || (useArrows && p.keys['ArrowRight']) || hc1.right;
           nitroKey = p.keys['ShiftLeft'] || p.keys['ShiftRight'];
           driftKey = p.keys['Space'];
         } else if (id === 'local-2' && isOffline) {
-          // Player 2 controls: IJKL or similar if arrows are taken?
-          // Let's use Arrows for P1 if WASD is P2? Or vice versa.
-          // Appears P1 uses both in current code. Let's split them.
-          // P1: WASD, Shift, Space
-          // P2: Arrows, Enter, R-Ctrl
-          up = p.keys['ArrowUp'];
-          down = p.keys['ArrowDown'];
-          left = p.keys['ArrowLeft'];
-          right = p.keys['ArrowRight'];
+          // Player 2 controls (Arrows or Hands)
+          up = p.keys['ArrowUp'] || hc2.forward;
+          down = p.keys['ArrowDown'] || hc2.backward;
+          left = p.keys['ArrowLeft'] || hc2.left;
+          right = p.keys['ArrowRight'] || hc2.right;
           nitroKey = p.keys['Enter'];
           driftKey = p.keys['ControlRight'];
-
-          // Adjust P1 to ONLY WASD
-          const p1 = localPlayersRef.current['local-1'];
-          if (p1) {
-            up = p === p1 ? (p.keys['KeyW']) : up;
-            down = p === p1 ? (p.keys['KeyS']) : down;
-            left = p === p1 ? (p.keys['KeyA']) : left;
-            right = p === p1 ? (p.keys['KeyD']) : right;
-            nitroKey = p === p1 ? (p.keys['ShiftLeft'] || p.keys['ShiftRight']) : nitroKey;
-            driftKey = p === p1 ? (p.keys['Space']) : driftKey;
-          }
         }
 
         // Acceleration
@@ -687,6 +694,28 @@ export default function GameCanvas({ initialPlayers, isOffline }: { initialPlaye
             if (!isOffline && id === socket.id && p.lapCount > 1) {
                 socket.emit('lapFinished', lapTime);
             }
+
+            // Check for Offline finish
+            if (isOffline && p.lapCount >= TOTAL_LAPS) {
+                // Return results calculated from players state
+                setPlayers(latestPlayers => {
+                    const finalResults = Object.values(latestPlayers)
+                        .sort((a, b) => {
+                            if (a.laps !== b.laps) return b.laps - a.laps;
+                            return a.bestLapTime - b.bestLapTime;
+                        })
+                        .map((p, i) => ({
+                            id: p.id,
+                            name: p.name,
+                            bestLapTime: p.bestLapTime,
+                            rank: i + 1
+                        }));
+                    
+                    if (onFinish) onFinish(finalResults);
+                    return latestPlayers;
+                });
+            }
+
             p.checkpoint = -1;
         }
 
@@ -852,8 +881,14 @@ export default function GameCanvas({ initialPlayers, isOffline }: { initialPlaye
       {/* Bottom Left: Controls (Faded) */}
       <div className="absolute bottom-6 left-6 text-white pointer-events-none opacity-50 hover:opacity-100 transition-opacity duration-300">
         <div className="bg-black/40 p-5 rounded-xl backdrop-blur-md border border-white/10">
-            <h3 className="font-bold text-sm mb-2 text-yellow-400/80">Controls</h3>
+            <h3 className="font-bold text-sm mb-2 text-yellow-400/80">Controls (Keyboard or Hand Gestures)</h3>
             <div className="flex gap-8">
+              <ul className="text-xs space-y-1 font-mono text-slate-300">
+                <li className="text-yellow-400 font-bold mb-1 underline">HAND GESTURES</li>
+                <li>FIST : Accelerate</li>
+                <li>OPEN : Brake</li>
+                <li>MOVE L/R : Turn</li>
+              </ul>
               <ul className="text-xs space-y-1 font-mono text-slate-300">
                 <li className="text-yellow-400 font-bold mb-1 underline">PLAYER 1</li>
                 <li>W / S : Gas/Brake</li>
@@ -873,6 +908,10 @@ export default function GameCanvas({ initialPlayers, isOffline }: { initialPlaye
             </div>
         </div>
       </div>
+      <HandTracker onControlUpdate={(p1, p2) => {
+          handControlsRef.current.p1 = p1;
+          handControlsRef.current.p2 = p2;
+      }} />
     </div>
   );
 }
