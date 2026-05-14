@@ -78,6 +78,8 @@ export default function HandTracker({ onControlUpdate }: HandTrackerProps) {
     setupCamera();
   }, [isActive]);
 
+  const [status, setStatus] = useState({ p1: '', p2: '' });
+
   const predictWebcam = async () => {
     const video = videoRef.current;
     if (!video || !landmarkerRef.current || video.videoWidth === 0 || video.videoHeight === 0 || video.readyState < 2) {
@@ -93,11 +95,12 @@ export default function HandTracker({ onControlUpdate }: HandTrackerProps) {
 
     if (results.landmarks && results.landmarks.length > 0) {
       const handCount = results.landmarks.length;
-      // Sort hands by X descending so index 0 is the Screen-Left hand (High camera X)
+      // Mirroring: Camera Right is Screen Left. Higher X = Left.
       const sortedHands = [...results.landmarks].sort((a, b) => b[0].x - a[0].x);
 
       sortedHands.forEach((landmarks, index) => {
-        const wrist = landmarks[0];
+        // Use MCP of middle finger (landmark 9) as the "pointer" for steering - it's more stable
+        const pointer = landmarks[9];
         
         // Finger fold logic
         const isFolded = (tipIdx: number, jointIdx: number) => {
@@ -119,27 +122,33 @@ export default function HandTracker({ onControlUpdate }: HandTrackerProps) {
         
         const ctrl = index === 0 ? p1Controls : p2Controls;
 
-        // Index finger or Fist to accelerate
+        // Accelerate/Brake
         if (isFist || isIndexPointing) ctrl.forward = true;
-        // Open hand to brake
         if (isOpen) ctrl.backward = true;
 
-        // Steering: Intuitive Mirroring
-        // If 1 hand: center is 0.5. If 2 hands: centers are 0.75 and 0.25.
-        // Screen-Left sector center (higher camera X)
-        // Screen-Right sector center (lower camera X)
+        // Steering: Mirroring logic (Higher X = Screen Left)
         let sectorCenter = 0.5;
         if (handCount > 1) {
-            sectorCenter = index === 0 ? 0.75 : 0.25;
+            sectorCenter = index === 0 ? 0.8 : 0.2; // Push centers slightly wider
         }
         
-        const deadZone = 0.07; // Slightly tighter deadzone
+        const deadZone = 0.05; // More sensitive deadzone
 
-        // Mirroring: physical left = screen left = higher camera X
-        if (wrist.x > sectorCenter + deadZone) ctrl.left = true;
-        if (wrist.x < sectorCenter - deadZone) ctrl.right = true;
+        if (pointer.x > sectorCenter + deadZone) ctrl.left = true;
+        if (pointer.x < sectorCenter - deadZone) ctrl.right = true;
       });
     }
+
+    // Update status for visual feedback
+    const getStatusStr = (c: HandControlState) => {
+        const parts = [];
+        if (c.forward) parts.push("↑");
+        if (c.backward) parts.push("↓");
+        if (c.left) parts.push("←");
+        if (c.right) parts.push("→");
+        return parts.join(' ');
+    };
+    setStatus({ p1: getStatusStr(p1Controls), p2: getStatusStr(p2Controls) });
 
     onControlUpdate(p1Controls, p2Controls);
     requestRef.current = requestAnimationFrame(predictWebcam);
@@ -147,13 +156,26 @@ export default function HandTracker({ onControlUpdate }: HandTrackerProps) {
 
   return (
     <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2">
-      <div className="relative w-40 h-30 bg-slate-800 rounded-lg overflow-hidden border-2 border-slate-700 shadow-xl group">
+      <div className="relative w-40 h-30 bg-slate-900 rounded-lg overflow-hidden border-2 border-slate-700 shadow-xl group">
         <video 
           ref={videoRef} 
           className="w-full h-full object-cover scale-x-[-1]" 
           muted 
           playsInline
         />
+        
+        {/* Status Indicators overlay */}
+        <div className="absolute inset-0 pointer-events-none flex justify-between p-1">
+            <div className="flex flex-col gap-1 items-start">
+                <span className="text-[8px] bg-yellow-500 text-black font-bold px-1 rounded-sm opacity-80 uppercase tracking-tighter">P1</span>
+                <span className="text-sm font-black text-yellow-400 drop-shadow-md">{status.p1}</span>
+            </div>
+            <div className="flex flex-col gap-1 items-end">
+                <span className="text-[8px] bg-blue-500 text-white font-bold px-1 rounded-sm opacity-80 uppercase tracking-tighter">P2</span>
+                <span className="text-sm font-black text-blue-400 drop-shadow-md">{status.p2}</span>
+            </div>
+        </div>
+
         {error && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/80 p-2 text-center text-[10px] text-red-400">
             {error}
@@ -164,8 +186,8 @@ export default function HandTracker({ onControlUpdate }: HandTrackerProps) {
             <div className="w-5 h-5 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
           </div>
         )}
-        <div className="absolute bottom-1 right-1 bg-black/60 px-1 rounded text-[8px] text-slate-400 uppercase font-bold">
-            Hand Link
+        <div className="absolute bottom-1 left-1/2 -translate-x-1/2 bg-black/60 px-1 rounded text-[7px] text-slate-400 uppercase font-bold whitespace-nowrap">
+            Hand Detection Active
         </div>
       </div>
       <div className="bg-slate-800/80 backdrop-blur px-3 py-1 rounded-full text-[10px] font-bold text-slate-300 border border-slate-700 flex items-center gap-2">
